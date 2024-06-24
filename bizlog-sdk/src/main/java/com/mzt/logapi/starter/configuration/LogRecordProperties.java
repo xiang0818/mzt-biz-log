@@ -70,6 +70,12 @@ public class LogRecordProperties {
      */
     private String ofWord = "的";
 
+    /**
+     * 是否不校验文案，全部记录日志
+     */
+    private Boolean diffLog = false;
+
+    private String useEqualsMethod;
 
     public void setAddTemplate(String template) {
         validatePlaceHolder(template);

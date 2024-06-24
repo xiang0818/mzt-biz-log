@@ -7,6 +7,8 @@ import com.mzt.logserver.IOrderService;
 import com.mzt.logserver.UserQueryService;
 import com.mzt.logserver.infrastructure.constants.LogRecordType;
 import com.mzt.logserver.pojo.Order;
+import com.mzt.logserver.pojo.Result;
+import com.mzt.logserver.pojo.User;
 import lombok.extern.slf4j.Slf4j;
 import org.assertj.core.util.Lists;
 import org.springframework.stereotype.Service;
@@ -38,6 +40,20 @@ public class OrderServiceImpl implements IOrderService {
         Order order1 = new Order();
         order1.setProductName("内部变量测试");
         LogRecordContext.putVariable("innerOrder", order1);
+        return true;
+    }
+
+    @Override
+    @LogRecord(
+            subType = "MANAGER_VIEW", extra = "{{#order.toString()}}",
+            success = "{{#order.purchaseName}}下了一个订单,购买商品「{{#order.productName}}」,下单结果:{{#_ret}}",
+            type = LogRecordType.ORDER, bizNo = "{{#order.orderNo}}")
+    @LogRecord(
+            subType = "USER_VIEW",
+            success = "{{#order.purchaseName}}下了一个订单,购买商品「{{#order.productName}}」,下单结果:{{#_ret}}",
+            type = LogRecordType.USER, bizNo = "{{#order.orderNo}}")
+    public boolean createOrders(Order order) {
+        log.info("【创建订单】orderNo={}", order.getOrderNo());
         return true;
     }
 
@@ -173,5 +189,66 @@ public class OrderServiceImpl implements IOrderService {
             type = LogRecordType.ORDER, bizNo = "{{#order.orderNo}}")
     public boolean testVariableInfo(Long orderId, Order order) {
         return false;
+    }
+
+    @Override
+    @LogRecord(success = "更新成功了订单{ORDER{#orderId}},更新内容为...",
+            fail = "更新失败了订单{ORDER{#orderId}},更新内容为...",
+            type = LogRecordType.ORDER, bizNo = "{{#order.orderNo}}",
+            condition = "{{#condition == null}}", successCondition = "{{#result.code == 200}}")
+    public Result<Boolean> testResultOnSuccess(Long orderId, Order order) {
+        Result<Boolean> result = new Result<>(200, "成功", true);
+        LogRecordContext.putVariable("result", result);
+        return result;
+    }
+
+    @Override
+    @LogRecord(success = "更新成功了订单{ORDER{#orderId}},更新内容为...",
+            fail = "更新失败了订单{ORDER{#orderId}},更新内容为...",
+            type = LogRecordType.ORDER, bizNo = "{{#order.orderNo}}",
+            condition = "{{#condition == null}}", successCondition = "{{#result.code == 200}}")
+    public Result<Boolean> testResultOnFail(Long orderId, Order order) {
+        Result<Boolean> result = new Result<>(500, "服务错误", false);
+        LogRecordContext.putVariable("result", result);
+        return result;
+    }
+
+    @Override
+    @LogRecord(success = "更新成功了订单{ORDER{#orderId}},更新内容为...",
+            type = LogRecordType.ORDER, bizNo = "{{#order.orderNo}}",
+            condition = "{{#condition == null}}", successCondition = "{{#result.code == 200}}")
+    public Result<Boolean> testResultNoLog(Long orderId, Order order) {
+        Result<Boolean> result = new Result<>(500, "服务错误", false);
+        LogRecordContext.putVariable("result", result);
+        return result;
+    }
+
+    @Override
+    @LogRecord(success = "更新用户{{#user.name}}的订单{ORDER{#order.orderId}}信息,更新内容为...",
+            type = LogRecordType.USER, bizNo = "{{#user.id}}")
+    public boolean testGlobalVariable(Order order) {
+        return false;
+    }
+
+    @Override
+    @LogRecord(success = "更新用户{{#user.name}}的订单{ORDER{#order.orderId}}信息,更新内容为...",
+            type = LogRecordType.USER, bizNo = "{{#user.id}}")
+    public boolean testGlobalVariableCover(Order order, User user) {
+        return false;
+    }
+
+    @Override
+    @LogRecord(success = "固定文案记录日志",
+            type = LogRecordType.USER, bizNo = "{{#text}}")
+    public void fixedCopy(String text) {
+        log.info("进入方法。。。");
+    }
+
+    @Override
+    @LogRecord(success = "更新了用户{_DIFF{#user, #oldUser}}",
+            type = LogRecordType.USER, bizNo = "{{#user.name}}",
+            extra = "{{#user.toString()}}")
+    public void fixedCopy2(User user, User oldUser) {
+
     }
 }

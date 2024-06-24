@@ -5,11 +5,13 @@ import com.mzt.logapi.service.ILogRecordService;
 import com.mzt.logserver.repository.LogRecordRepository;
 import com.mzt.logserver.repository.po.LogRecordPO;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
 import java.util.List;
 
+@Primary
 @Service
 @Slf4j
 public class DbLogRecordService implements ILogRecordService {
@@ -19,6 +21,7 @@ public class DbLogRecordService implements ILogRecordService {
 
     @Override
     public void record(LogRecord logRecord) {
+        log.info("record:{}", logRecord);
         logRecordRepository.save(LogRecordPO.from(logRecord));
     }
 

@@ -1,11 +1,12 @@
 package com.mzt.logapi.starter.support;
 
-import com.mzt.logapi.starter.annotation.EnableLogRecord;
-import com.mzt.logapi.starter.configuration.LogRecordProxyAutoConfiguration;
 import org.springframework.context.annotation.AdviceMode;
 import org.springframework.context.annotation.AdviceModeImportSelector;
 import org.springframework.context.annotation.AutoProxyRegistrar;
 import org.springframework.lang.Nullable;
+
+import com.mzt.logapi.starter.annotation.EnableLogRecord;
+import com.mzt.logapi.starter.configuration.LogRecordProxyAutoConfiguration;
 
 /**
  * DATE 6:57 PM
@@ -13,9 +14,6 @@ import org.springframework.lang.Nullable;
  * @author mzt.
  */
 public class LogRecordConfigureSelector extends AdviceModeImportSelector<EnableLogRecord> {
-    private static final String ASYNC_EXECUTION_ASPECT_CONFIGURATION_CLASS_NAME =
-            "com.mzt.logapi.starter.configuration.LogRecordProxyAutoConfiguration";
-
 
     @Override
     @Nullable
@@ -24,7 +22,7 @@ public class LogRecordConfigureSelector extends AdviceModeImportSelector<EnableL
             case PROXY:
                 return new String[]{AutoProxyRegistrar.class.getName(), LogRecordProxyAutoConfiguration.class.getName()};
             case ASPECTJ:
-                return new String[]{ASYNC_EXECUTION_ASPECT_CONFIGURATION_CLASS_NAME};
+                return new String[] {LogRecordProxyAutoConfiguration.class.getName()};
             default:
                 return null;
         }
