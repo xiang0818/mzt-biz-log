@@ -1,114 +1,153 @@
 package com.mzt.logapi.starter.diff;
 
-import com.google.common.collect.Lists;
 import com.mzt.logapi.service.IFunctionService;
+import com.mzt.logapi.starter.annotation.DIffLogIgnore;
+import com.mzt.logapi.starter.annotation.DiffLogAllFields;
 import com.mzt.logapi.starter.annotation.DiffLogField;
 import com.mzt.logapi.starter.configuration.LogRecordProperties;
 import de.danielbechler.diff.node.DiffNode;
-import lombok.AllArgsConstructor;
+import de.danielbechler.diff.selector.ElementSelector;
+import lombok.Getter;
+import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.BeansException;
+import org.springframework.beans.factory.BeanFactory;
+import org.springframework.beans.factory.BeanFactoryAware;
+import org.springframework.beans.factory.SmartInitializingSingleton;
+import org.springframework.lang.NonNull;
 import org.springframework.util.CollectionUtils;
+import org.springframework.util.ReflectionUtils;
 import org.springframework.util.StringUtils;
 
-import java.util.ArrayList;
-import java.util.Collection;
+import java.lang.reflect.Field;
+import java.util.*;
 
 /**
  * @author muzhantong
  * create on 2022/1/3 8:52 下午
  */
 @Slf4j
-@AllArgsConstructor
-public class DefaultDiffItemsToLogContentService implements IDiffItemsToLogContentService {
+@Setter
+@Getter
+public class DefaultDiffItemsToLogContentService implements IDiffItemsToLogContentService, BeanFactoryAware, SmartInitializingSingleton {
 
-    private final IFunctionService functionService;
+    private IFunctionService functionService;
     private final LogRecordProperties logRecordProperties;
+    private BeanFactory beanFactory;
+
+    public DefaultDiffItemsToLogContentService(LogRecordProperties logRecordProperties) {
+        this.logRecordProperties = logRecordProperties;
+    }
 
     @Override
     public String toLogContent(DiffNode diffNode, final Object sourceObject, final Object targetObject) {
         if (!diffNode.hasChanges()) {
             return "";
         }
+        DiffLogAllFields annotation = sourceObject.getClass().getAnnotation(DiffLogAllFields.class);
         StringBuilder stringBuilder = new StringBuilder();
-        diffNode.visit((node, visit) -> {
-            generateAllFieldLog(sourceObject, targetObject, stringBuilder, node);
-        });
+        Set<DiffNode> set = new HashSet<>();
+        diffNode.visit((node, visit) -> generateAllFieldLog(sourceObject, targetObject, stringBuilder, node, annotation, set));
+        set.clear();
         return stringBuilder.toString().replaceAll(logRecordProperties.getFieldSeparator().concat("$"), "");
     }
 
-    private void generateAllFieldLog(Object sourceObject, Object targetObject, StringBuilder stringBuilder, DiffNode node) {
-        if (node.isRootNode()) {
+    private void generateAllFieldLog(Object sourceObject, Object targetObject, StringBuilder stringBuilder, DiffNode node,
+                                     DiffLogAllFields annotation, Set<DiffNode> set) {
+        if (node.isRootNode() || node.getValueTypeInfo() != null || set.contains(node)) {
+            return;
+        }
+        DIffLogIgnore logIgnore = node.getFieldAnnotation(DIffLogIgnore.class);
+        if (logIgnore != null) {
+            memorandum(node, set);
             return;
         }
         DiffLogField diffLogFieldAnnotation = node.getFieldAnnotation(DiffLogField.class);
-        if (diffLogFieldAnnotation == null || node.getValueTypeInfo() != null) {
-            //自定义对象类型直接进入对象里面, diff
+        if (annotation == null && diffLogFieldAnnotation == null) {
             return;
         }
-        String filedLogName = getFieldLogName(node, diffLogFieldAnnotation);
+        String filedLogName = getFieldLogName(node, diffLogFieldAnnotation, annotation != null);
         if (StringUtils.isEmpty(filedLogName)) {
             return;
         }
-        //是否是List类型的字段
-        boolean valueIsCollection = valueIsCollection(node, sourceObject, targetObject);
-        //获取值的转换函数
-        DiffNode.State state = node.getState();
-        String logContent = getDiffLogContent(filedLogName, node, state, sourceObject, targetObject, diffLogFieldAnnotation.function(), valueIsCollection);
+        // 是否是容器类型的字段
+        boolean valueIsContainer = valueIsContainer(node, sourceObject, targetObject);
+        String functionName = diffLogFieldAnnotation != null ? diffLogFieldAnnotation.function() : "";
+        String logContent = valueIsContainer
+                ? getCollectionDiffLogContent(filedLogName, node, sourceObject, targetObject, functionName)
+                : getDiffLogContent(filedLogName, node, sourceObject, targetObject, functionName);
         if (!StringUtils.isEmpty(logContent)) {
             stringBuilder.append(logContent).append(logRecordProperties.getFieldSeparator());
         }
+        memorandum(node, set);
     }
 
-    private String getFieldLogName(DiffNode node, DiffLogField diffLogFieldAnnotation) {
-        String filedLogName = diffLogFieldAnnotation.name();
+    private void memorandum(DiffNode node, Set<DiffNode> set) {
+        set.add(node);
+        if (node.hasChildren()) {
+            Field childrenField = ReflectionUtils.findField(DiffNode.class, "children");
+            assert childrenField != null;
+            ReflectionUtils.makeAccessible(childrenField);
+            Map<ElementSelector, DiffNode> children = (Map<ElementSelector, DiffNode>) ReflectionUtils.getField(childrenField, node);
+            assert children != null;
+            for (DiffNode value : children.values()) memorandum(value, set);
+        }
+    }
+
+    private String getFieldLogName(DiffNode node, DiffLogField diffLogFieldAnnotation, boolean isField) {
+        String filedLogName = diffLogFieldAnnotation != null ? diffLogFieldAnnotation.name() : node.getPropertyName();
         if (node.getParentNode() != null) {
             //获取对象的定语：比如：创建人的ID
-            filedLogName = getParentFieldName(node) + filedLogName;
+            filedLogName = getParentFieldName(node, isField) + filedLogName;
         }
         return filedLogName;
     }
 
-    private boolean valueIsCollection(DiffNode node, Object sourceObject, Object targetObject) {
+    private boolean valueIsContainer(DiffNode node, Object sourceObject, Object targetObject) {
         if (sourceObject != null) {
             Object sourceValue = node.canonicalGet(sourceObject);
             if (sourceValue == null) {
                 if (targetObject != null) {
-                    return node.canonicalGet(targetObject) instanceof Collection;
+                    return node.canonicalGet(targetObject) instanceof Collection || node.canonicalGet(targetObject).getClass().isArray();
                 }
+            } else {
+                return sourceValue instanceof Collection || sourceValue.getClass().isArray();
             }
-            return sourceValue instanceof Collection;
         }
         return false;
     }
 
-    private String getParentFieldName(DiffNode node) {
+    private String getParentFieldName(DiffNode node, boolean isField) {
         DiffNode parent = node.getParentNode();
         String fieldNamePrefix = "";
         while (parent != null) {
             DiffLogField diffLogFieldAnnotation = parent.getFieldAnnotation(DiffLogField.class);
-            if (diffLogFieldAnnotation == null) {
-                //父节点没有配置名称，不拼接
+            if ((diffLogFieldAnnotation == null && !isField) || parent.isRootNode()) {
+                // 父节点没有配置名称且不用属性名映射，不拼接
                 parent = parent.getParentNode();
                 continue;
             }
-            fieldNamePrefix = diffLogFieldAnnotation.name().concat(logRecordProperties.getOfWord()).concat(fieldNamePrefix);
+            fieldNamePrefix = diffLogFieldAnnotation != null
+                    ? diffLogFieldAnnotation.name().concat(logRecordProperties.getOfWord()).concat(fieldNamePrefix)
+                    : parent.getPropertyName().concat(logRecordProperties.getOfWord()).concat(fieldNamePrefix);
             parent = parent.getParentNode();
         }
         return fieldNamePrefix;
     }
 
-    public String getDiffLogContent(String filedLogName, DiffNode node, DiffNode.State state, Object sourceObject, Object targetObject, String functionName, boolean valueIsCollection) {
+    public String getCollectionDiffLogContent(String filedLogName, DiffNode node, Object sourceObject, Object targetObject, String functionName) {
         //集合走单独的diff模板
-        if (valueIsCollection) {
-            Collection<Object> sourceList = getListValue(node, sourceObject);
-            Collection<Object> targetList = getListValue(node, targetObject);
-            Collection<Object> addItemList = listSubtract(targetList, sourceList);
-            Collection<Object> delItemList = listSubtract(sourceList, targetList);
-            String listAddContent = listToContent(functionName, addItemList);
-            String listDelContent = listToContent(functionName, delItemList);
-            return logRecordProperties.formatList(filedLogName, listAddContent, listDelContent);
-        }
-        switch (state) {
+        Collection<Object> sourceList = getListValue(node, sourceObject);
+        Collection<Object> targetList = getListValue(node, targetObject);
+        Collection<Object> addItemList = listSubtract(targetList, sourceList);
+        Collection<Object> delItemList = listSubtract(sourceList, targetList);
+        String listAddContent = listToContent(functionName, addItemList);
+        String listDelContent = listToContent(functionName, delItemList);
+        return logRecordProperties.formatList(filedLogName, listAddContent, listDelContent);
+    }
+
+    public String getDiffLogContent(String filedLogName, DiffNode node, Object sourceObject, Object targetObject, String functionName) {
+        switch (node.getState()) {
             case ADDED:
                 return logRecordProperties.formatAdd(filedLogName, getFunctionValue(getFieldValue(node, targetObject), functionName));
             case CHANGED:
@@ -118,14 +157,16 @@ public class DefaultDiffItemsToLogContentService implements IDiffItemsToLogConte
             default:
                 log.warn("diff log not support");
                 return "";
-
         }
     }
 
     private Collection<Object> getListValue(DiffNode node, Object object) {
         Object fieldSourceValue = getFieldValue(node, object);
         //noinspection unchecked
-        return fieldSourceValue == null ? Lists.newArrayList() : (Collection<Object>) fieldSourceValue;
+        if (fieldSourceValue != null && fieldSourceValue.getClass().isArray()) {
+            return new ArrayList<>(Arrays.asList((Object[]) fieldSourceValue));
+        }
+        return fieldSourceValue == null ? new ArrayList<>() : (Collection<Object>) fieldSourceValue;
     }
 
     private Collection<Object> listSubtract(Collection<Object> minuend, Collection<Object> subTractor) {
@@ -153,5 +194,15 @@ public class DefaultDiffItemsToLogContentService implements IDiffItemsToLogConte
 
     private Object getFieldValue(DiffNode node, Object o2) {
         return node.canonicalGet(o2);
+    }
+
+    @Override
+    public void setBeanFactory(@NonNull BeanFactory beanFactory) throws BeansException {
+        this.beanFactory = beanFactory;
+    }
+
+    @Override
+    public void afterSingletonsInstantiated() {
+        this.functionService = beanFactory.getBean(IFunctionService.class);
     }
 }

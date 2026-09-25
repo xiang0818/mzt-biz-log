@@ -24,6 +24,7 @@
     <modules>
         <module>bizlog-sdk</module>
         <module>bizlog-server</module>
+        <module>bizlog-sdk-xml</module>
     </modules>
 
 
@@ -80,6 +81,12 @@
                         </goals>
                     </execution>
                 </executions>
+                <configuration>
+                    <gpgArguments>
+                        <arg>--pinentry-mode</arg>
+                        <arg>loopback</arg>
+                    </gpgArguments>
+                </configuration>
             </plugin>
             <plugin>
                 <groupId>org.sonatype.plugins</groupId>
